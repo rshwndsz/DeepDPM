@@ -5,11 +5,13 @@
 #
 
 import os
-import torch
-from torchvision import datasets, transforms
-from torch.utils.data import TensorDataset
+
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler, StandardScaler, Normalizer
+import torch
+from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
+from torch.utils.data import TensorDataset
+from torchvision import datasets, transforms
+
 
 def transform_embeddings(transform_type, data):
     if transform_type == "normalize":
@@ -50,7 +52,7 @@ class MyDataset:
 
     def get_test_loader(self):
         test_data = self.get_test_data()
-        if len(test_data) > 0:     
+        if len(test_data) > 0:
             return torch.utils.data.DataLoader(test_data, batch_size=self.args.batch_size, shuffle=False, num_workers=6)
         else:
             return None
@@ -131,7 +133,7 @@ class USPS(MyDataset):
             data = f.readlines()
         data = data[1:-1]
         data = [list(map(float, line.split())) for line in data]
-        data = torch.Tensor(data)
+        data = torch.tensor(data)
         imgs = data[:, 1:]
         labels = data[:, 0]
         if self.args.transform_input_data:
@@ -200,8 +202,9 @@ class REUTERS(MyDataset):
 
     def make_reuters_data(self, data_dir, how_many):
         np.random.seed(1234)
-        from sklearn.feature_extraction.text import CountVectorizer
         from os.path import join
+
+        from sklearn.feature_extraction.text import CountVectorizer
 
         did_to_cat = {}
         cat_list = ["CCAT", "GCAT", "MCAT", "ECAT"]
@@ -333,7 +336,7 @@ class GMM_dataset(MyDataset):
         samples = [self.GMMs[comp].rsample() for comp in components]
 
         tensor_samples = torch.cat(
-            samples, out=torch.Tensor(n_samples, self.data_dim)
+            samples, out=torch.tensor(n_samples, self.data_dim)
         ).reshape(n_samples, -1)
         return tensor_samples, torch.tensor(components)
 
@@ -355,9 +358,9 @@ class CustomDataset(MyDataset):
         super().__init__(args)
         self.transformer = transforms.Compose([transforms.ToTensor()])
         self._data_dim = 0
-    
+
     def get_train_data(self):
-        train_codes = torch.Tensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
+        train_codes = torch.load(os.path.join(self.data_dir, "train_data.pt"))
         if self.args.transform_input_data:
             train_codes = transform_embeddings(self.args.transform_input_data, train_codes)
         if self.args.use_labels_for_eval:
@@ -365,7 +368,7 @@ class CustomDataset(MyDataset):
         else:
             train_labels = torch.zeros((train_codes.size()[0]))
         self._data_dim = train_codes.size()[1]
-        
+
         train_set = TensorDatasetWrapper(train_codes, train_labels)
         del train_codes
         del train_labels
@@ -381,7 +384,7 @@ class CustomDataset(MyDataset):
         except FileNotFoundError:
             print("Test data not found! running only with train data")
             return TensorDatasetWrapper(torch.empty(0), torch.empty(0))
-        
+
         if self.args.transform_input_data:
             test_codes = transform_embeddings(self.args.transform_input_data, test_codes)
         test_set = TensorDatasetWrapper(test_codes, test_labels)
