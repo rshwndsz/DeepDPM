@@ -20,6 +20,8 @@ def transform_embeddings(transform_type, data):
         return torch.Tensor(MinMaxScaler().fit_transform(data))
     elif transform_type == "standard":
         return torch.Tensor(StandardScaler().fit_transform(data))
+    elif transform_type == "as_is":
+        return data.to(torch.float)
     else:
         raise NotImplementedError()
 

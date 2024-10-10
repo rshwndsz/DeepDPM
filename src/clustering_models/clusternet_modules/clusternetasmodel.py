@@ -5,31 +5,39 @@
 #
 
 from argparse import ArgumentParser
-import numpy as np
+
 import matplotlib.pyplot as plt
-
-import torch
-from torch import optim
+import numpy as np
 import pytorch_lightning as pl
+import torch
+from sklearn.metrics import (
+    adjusted_mutual_info_score,
+    adjusted_rand_score,
+    homogeneity_completeness_v_measure,
+    silhouette_score,
+)
 from sklearn.metrics.cluster import normalized_mutual_info_score
-from sklearn.metrics import adjusted_rand_score, silhouette_score, adjusted_mutual_info_score, homogeneity_completeness_v_measure
+from torch import optim
 
-from src.clustering_models.clusternet_modules.utils.plotting_utils import PlotUtils
-from src.clustering_models.clusternet_modules.utils.training_utils import training_utils
+from src.clustering_models.clusternet_modules.models.Classifiers import (
+    MLP_Classifier,
+    Subclustering_net,
+)
+from src.clustering_models.clusternet_modules.utils.clustering_utils.clustering_operations import (
+    compute_data_covs_hard_assignment,
+    init_mus_and_covs,
+)
 from src.clustering_models.clusternet_modules.utils.clustering_utils.priors import (
     Priors,
 )
-from src.clustering_models.clusternet_modules.utils.clustering_utils.clustering_operations import (
-    init_mus_and_covs,
-    compute_data_covs_hard_assignment,
-)
 from src.clustering_models.clusternet_modules.utils.clustering_utils.split_merge_operations import (
-    update_models_parameters_split,
-    split_step,
     merge_step,
+    split_step,
     update_models_parameters_merge,
+    update_models_parameters_split,
 )
-from src.clustering_models.clusternet_modules.models.Classifiers import MLP_Classifier, Subclustering_net
+from src.clustering_models.clusternet_modules.utils.plotting_utils import PlotUtils
+from src.clustering_models.clusternet_modules.utils.training_utils import training_utils
 
 
 class ClusterNetModel(pl.LightningModule):
@@ -92,7 +100,7 @@ class ClusterNetModel(pl.LightningModule):
 
         return self.cluster_net(codes)
 
-        
+
 
     def on_train_epoch_start(self):
         # get current training_stage
@@ -550,7 +558,7 @@ class ClusterNetModel(pl.LightningModule):
                             self.plot_utils.plot_cluster_and_decision_boundaries(samples=self.codes, labels=self.train_resp.argmax(-1), gt_labels=self.train_gt, net_centers=self.mus, net_covs=self.covs, n_epoch=self.current_epoch, cluster_net=self)
                     if self.current_epoch in (0, 1, 2, 3, 4, 5, 10, 100, 200, 300, 400, 500, 549, self.hparams.start_sub_clustering, self.hparams.start_sub_clustering+1) or self.split_performed or self.merge_performed:
                         self.plot_histograms(for_thesis=True)
-        
+
         if self.split_performed or self.merge_performed:
             self.update_params_split_merge()
             print("Current number of clusters: ", self.K)
@@ -590,7 +598,7 @@ class ClusterNetModel(pl.LightningModule):
             from pytorch_lightning.loggers.base import DummyLogger
             if not isinstance(self.logger, DummyLogger):
                 self.plot_histograms(train=False, for_thesis=True)
-        
+
     def subcluster(self, codes, logits, hard_assignment=True):
         # cluster codes into subclusters
         sub_clus_resp = self.subclustering_net(codes)  # unnormalized
@@ -671,11 +679,11 @@ class ClusterNetModel(pl.LightningModule):
     def update_subcluster_nets_merge(self, merge_decisions, pairs_to_merge, highest_ll):
         # update the cluster net to have the new K
         subclus_opt = self.optimizers()[self.optimizers_dict_idx["subcluster_net_opt"]]
-        
+
         # remove old weights from the optimizer state
         for p in self.subclustering_net.parameters():
             subclus_opt.state.pop(p)
-        self.subclustering_net.update_K_merge(merge_decisions, pairs_to_merge=pairs_to_merge, highest_ll=highest_ll, init_new_weights=self.hparams.merge_init_weights_sub)        
+        self.subclustering_net.update_K_merge(merge_decisions, pairs_to_merge=pairs_to_merge, highest_ll=highest_ll, init_new_weights=self.hparams.merge_init_weights_sub)
         subclus_opt.param_groups[0]["params"] = list(self.subclustering_net.parameters())
 
     def perform_merge(self, mus_lists_to_merge, highest_ll_mus, use_priors=True):
@@ -731,7 +739,7 @@ class ClusterNetModel(pl.LightningModule):
         # remove old weights from the optimizer state
         for p in self.cluster_net.class_fc2.parameters():
             clus_opt.state.pop(p)
-        
+
         # update cluster net
         self.cluster_net.update_K_merge(
             inds_to_mask,
@@ -932,7 +940,7 @@ class ClusterNetModel(pl.LightningModule):
         gt_nmi = normalized_mutual_info_score(gt, z)
         ari = adjusted_rand_score(gt, z)
         acc_top5, acc = training_utils.cluster_acc(gt, z, z_top5)
-        
+
         self.log(f"cluster_net_train/{stage}/{stage}_nmi", gt_nmi, on_epoch=True, on_step=False)
         self.log(f"cluster_net_train/{stage}/{stage}_ari", ari, on_epoch=True, on_step=False)
         self.log(f"cluster_net_train/{stage}/{stage}_acc", acc, on_epoch=True, on_step=False)
@@ -989,7 +997,7 @@ class ClusterNetModel(pl.LightningModule):
             "--transform_input_data",
             type=str,
             default="normalize",
-            choices=["normalize", "min_max", "standard", "standard_normalize", "None", None],
+            choices=["normalize", "min_max", "standard", "standard_normalize", "None", "as_is", None],
             help="Use normalization for embedded data",
         )
         parser.add_argument(
@@ -1240,7 +1248,7 @@ class ClusterNetModel(pl.LightningModule):
             default="isotropic",
             choices=["diag_NIG", "isotropic", "KL_GMM_2"],
         )
-        
+
         parser.add_argument(
             "--use_priors_for_net_params_init",
             type=bool,

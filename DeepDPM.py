@@ -5,22 +5,28 @@
 #
 
 import argparse
-from argparse import ArgumentParser
 import os
-from pytorch_lightning.loggers.neptune import NeptuneLogger
-from pytorch_lightning.loggers.base import DummyLogger
-import pytorch_lightning as pl
-from sklearn.metrics import normalized_mutual_info_score as NMI
-from sklearn.metrics import adjusted_rand_score as ARI
-import numpy as np
+from argparse import ArgumentParser
+from datetime import datetime
 
-from src.datasets import CustomDataset
-from src.datasets import GMM_dataset
+import numpy as np
+import pandas as pd
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning.loggers.base import DummyLogger
+from pytorch_lightning.loggers.neptune import NeptuneLogger
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
+from src.datasets import CustomDataset, GMM_dataset
 from src.utils import check_args, cluster_acc
 
 
 def parse_minimal_args(parser):
+    # Save parameters
+    parser.add_argument("--save-dir", default=f"./results/{datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S')}")
+
     # Dataset parameters
     parser.add_argument("--dir", default="./pretrained_embeddings/umap_embedded_datasets/", help="dataset directory")
     parser.add_argument("--dataset", default="custom")
@@ -61,7 +67,7 @@ def parse_minimal_args(parser):
         "--limit_train_batches", type=float, default=1., help="used for debugging"
     )
     parser.add_argument(
-        "--limit_val_batches", type=float, default=1., help="used for debugging" 
+        "--limit_val_batches", type=float, default=1., help="used for debugging"
     )
     parser.add_argument(
         "--save_checkpoints", type=bool, default=False
@@ -94,11 +100,13 @@ def run_on_embeddings_hyperparams(parent_parser):
         default=[50],
         help="The hidden layers in the clusternet. Defaults to [50, 50].",
     )
+    # https://github.com/BGU-CS-VIL/DeepDPM/issues/44
+    # Not using normalize could have issues with PSD covariance matrix
     parser.add_argument(
         "--transform_input_data",
         type=str,
-        default="normalize",
-        choices=["normalize", "min_max", "standard", "standard_normalize", "None", None],
+        default=None,
+        choices=["normalize", "min_max", "standard", "standard_normalize", "as_is", "None", None],
         help="Use normalization for embedded data",
     )
     parser.add_argument(
@@ -349,7 +357,7 @@ def run_on_embeddings_hyperparams(parent_parser):
         default="isotropic",
         choices=["diag_NIG", "isotropic", "KL_GMM_2"],
     )
-    
+
     parser.add_argument(
         "--ignore_subclusters",
         type=bool,
@@ -373,15 +381,9 @@ def run_on_embeddings_hyperparams(parent_parser):
     return parser
 
 
-
-def train_cluster_net():
-    parser = argparse.ArgumentParser(description="Only_for_embbedding")
-    parser = parse_minimal_args(parser)
-    parser = run_on_embeddings_hyperparams(parser)
-    args = parser.parse_args()
-
+def train_cluster_net(args):
     args.train_cluster_net = args.max_epochs
-    
+
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
     else:
@@ -389,13 +391,13 @@ def train_cluster_net():
     train_loader, val_loader = dataset_obj.get_loaders()
 
     tags = ['umap_embbeded_dataset']
-    
+
     if args.offline:
         logger = DummyLogger()
     else:
         logger = NeptuneLogger(
-                api_key='your_API_token',
-                project_name='your_project_name',
+                api_key=open("neptune.token", "r").read().strip(),
+                project_name='r.s.dsouza/themis',
                 experiment_name=args.exp_name,
                 params=vars(args),
                 tags=tags
@@ -413,7 +415,7 @@ def train_cluster_net():
     # Main body
     if args.seed:
         pl.utilities.seed.seed_everything(args.seed)
-    
+
     model = ClusterNetModel(hparams=args, input_dim=dataset_obj.data_dim, init_k=args.init_k)
     if args.save_checkpoints:
         from pytorch_lightning.callbacks import ModelCheckpoint
@@ -423,7 +425,7 @@ def train_cluster_net():
         os.makedirs(f'./saved_models/{args.dataset}/{args.exp_name}')
     else:
         checkpoint_callback = False
-    
+
     trainer = pl.Trainer(logger=logger, max_epochs=args.max_epochs, gpus=args.gpus, num_sanity_val_steps=0, checkpoint_callback=checkpoint_callback, limit_train_batches=args.limit_train_batches, limit_val_batches=args.limit_val_batches)
     trainer.fit(model, train_loader, val_loader)
 
@@ -440,9 +442,22 @@ def train_cluster_net():
         ari = np.round(ARI(net_pred, labels), 5)
 
         print(f"NMI: {nmi}, ARI: {ari}, acc: {acc}, final K: {len(np.unique(net_pred))}")
-    
+
+    # Save model
+    torch.save(model.state_dict(), os.path.join(args.save_dir, "model.pth"))
+
     return net_pred
 
 
 if __name__ == "__main__":
-    train_cluster_net()
+    parser = argparse.ArgumentParser(description="Only_for_embbedding")
+    parser = parse_minimal_args(parser)
+    parser = run_on_embeddings_hyperparams(parser)
+    args = parser.parse_args()
+
+    os.makedirs(args.save_dir, exist_ok=False)
+    net_pred = train_cluster_net(args)
+
+    np.save(os.path.join(args.save_dir, "deepDPM_predictions.npy"), net_pred)
+    df = pd.DataFrame(net_pred)
+    df.to_csv(os.path.join(args.save_dir, "deepDPM_predictions.csv"))
